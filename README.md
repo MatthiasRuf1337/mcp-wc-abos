@@ -32,6 +32,11 @@ claude mcp add wc-abos \
 
 Danach Claude-Code-Session neu starten. Check: `claude mcp list` → `wc-abos: ✔ Connected`
 
+> **Hinweis:** Der Befehl landet mit den Keys in der Shell-History (`~/.zsh_history`).
+> Wer das vermeiden will, nutzt Variante B – dort stehen die Keys nur in der `.env`.
+> Generell gilt: pro Person ein eigener Key mit Berechtigung **Lesen**, dann lässt sich
+> jeder Key einzeln widerrufen.
+
 ### Variante B — geklont (Keys in .env-Datei)
 
 ```bash
@@ -53,8 +58,8 @@ claude mcp add wc-abos -- node "$(pwd)/server.js"
 Der Server lädt eine `.env` neben `server.js` (oder eine Ebene höher) automatisch.
 Explizit gesetzte Umgebungsvariablen (z.B. via `--env`) haben Vorrang.
 
-> **Wichtig:** Die Keys haben Vollzugriff im erlaubten Scope – niemals committen oder in
-> Client-Code einbetten. Für diesen Server reicht ein Key mit Berechtigung **Lesen**
+> **Wichtig:** Die Keys niemals committen oder in Client-Code einbetten. Für diesen
+> Server reicht ein Key mit Berechtigung **Lesen**
 > (WooCommerce → Einstellungen → Erweitert → REST-API).
 
 ## Manuell testen
