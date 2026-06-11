@@ -208,8 +208,9 @@ server.registerTool(
       "Abos finden, deren Enddatum (end_date) oder nächste Zahlung (next_payment_date) in einem " +
       "Zeitraum liegt. Die REST API kann danach nicht filtern – dieses Tool blättert deshalb " +
       "serverseitig durch alle Abos (schlanke Felder, parallele Requests) und filtert selbst. " +
-      "Bei 50.000+ Abos dauert ein kompletter Scan 1–3 Minuten. Default-Status: active + " +
-      "pending-cancel (gekündigt, läuft aus).",
+      "Ein Komplett-Scan über 50.000+ Abos dauert mehrere Minuten – bei Timeout-Gefahr in " +
+      "Etappen aufrufen (max_pages=150, dann mit start_page aus dem hint fortsetzen) und die " +
+      "Teilergebnisse zusammenführen. Default-Status: active + pending-cancel (gekündigt, läuft aus).",
     inputSchema: {
       from: z.string().describe("Zeitraum-Beginn (YYYY-MM-DD, Pflicht)"),
       to: z.string().describe("Zeitraum-Ende (YYYY-MM-DD, Pflicht)"),
