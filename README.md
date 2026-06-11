@@ -16,12 +16,19 @@ löschen oder anlegen.
 | `get_order` | `GET /wc/v3/orders/{id}` |
 | `list_orders` | `GET /wc/v3/orders?status=…&page=…` |
 | `find_customer` | `GET /wc/v3/customers?email=…` / `?search=…` |
+| `list_subscriptions_ending` | Scan über alle Abos, filtert nach `end_date` / `next_payment_date` |
 
 **Listen-Filter** (`list_subscriptions` / `list_orders`): `status`, `customer`, `search`,
 Zeitraum über `after` / `before` und `modified_after` / `modified_before` (`YYYY-MM-DD`
 reicht, volle ISO8601-Zeit optional), Sortierung über `orderby` (`date`/`id`/`modified`) +
 `order` (`asc`/`desc`). `list_orders` zusätzlich: `product` (Produkt-ID).
 `find_customer` liefert die `customer_id` für den `customer`-Filter.
+
+**Auslaufende Abos:** Die REST API kann nicht nach `end_date`/`next_payment_date` filtern.
+`list_subscriptions_ending(from, to)` blättert deshalb serverseitig durch alle Abos
+(schlanke Felder via `_fields`, 5 Requests parallel) und filtert selbst — ein kompletter
+Scan über 50.000+ Abos dauert wenige Minuten. Default-Status: `active` + `pending-cancel`.
+Mit `max_pages`/`start_page` lässt sich der Scan begrenzen und fortsetzen.
 
 Listen-Antworten enthalten `total` / `total_pages` (aus den `X-WP-Total*`-Headern).
 `_links` wird aus den Antworten entfernt, sonst bleibt das JSON unverändert.

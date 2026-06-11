@@ -94,7 +94,7 @@ function isoDate(v, endOfDay = false) {
   return v;
 }
 
-const server = new McpServer({ name: "wc-abos", version: "1.1.0" });
+const server = new McpServer({ name: "wc-abos", version: "1.2.0" });
 
 const paginierung = {
   per_page: z.number().int().min(1).max(100).optional().describe("Treffer pro Seite (max. 100, Default 100)"),
@@ -198,6 +198,87 @@ server.registerTool(
   },
   async (args) =>
     listResult(await wcGet("orders", { ...listParams(args), product: args.product }), args.page)
+);
+
+server.registerTool(
+  "list_subscriptions_ending",
+  {
+    title: "Auslaufende Abos finden",
+    description:
+      "Abos finden, deren Enddatum (end_date) oder nächste Zahlung (next_payment_date) in einem " +
+      "Zeitraum liegt. Die REST API kann danach nicht filtern – dieses Tool blättert deshalb " +
+      "serverseitig durch alle Abos (schlanke Felder, parallele Requests) und filtert selbst. " +
+      "Bei 50.000+ Abos dauert ein kompletter Scan 1–3 Minuten. Default-Status: active + " +
+      "pending-cancel (gekündigt, läuft aus).",
+    inputSchema: {
+      from: z.string().describe("Zeitraum-Beginn (YYYY-MM-DD, Pflicht)"),
+      to: z.string().describe("Zeitraum-Ende (YYYY-MM-DD, Pflicht)"),
+      date_field: z
+        .enum(["end_date", "next_payment_date"])
+        .optional()
+        .describe("Welches Datum zählt: end_date = Abo läuft aus (Default), next_payment_date = nächste Abbuchung"),
+      status: z
+        .enum(["active+pending-cancel", "active", "on-hold", "pending-cancel", "cancelled", "expired", "any"])
+        .optional()
+        .describe("Status-Filter für den Scan (Default: active+pending-cancel)"),
+      max_pages: z.number().int().min(1).optional().describe("Scan-Limit in Seiten à 100 (Default: alle)"),
+      start_page: z.number().int().min(1).optional().describe("Scan ab dieser Seite fortsetzen (für Folge-Aufrufe)"),
+    },
+  },
+  async ({ from, to, date_field = "end_date", status = "active+pending-cancel", max_pages, start_page = 1 }) => {
+    const field = date_field === "end_date" ? "end_date_gmt" : "next_payment_date_gmt";
+    const fromIso = isoDate(from), toIso = isoDate(to, true);
+    const fields = `id,number,status,end_date_gmt,next_payment_date_gmt,start_date_gmt,billing,line_items`;
+    const statuses = status === "active+pending-cancel" ? ["active", "pending-cancel"] : [status];
+    const CONCURRENCY = 5;
+    const matches = [];
+    let scanned = 0, pagesScanned = 0, complete = true, nextPage = null;
+
+    for (const st of statuses) {
+      const first = await wcGet("subscriptions", { status: st, per_page: 100, page: start_page, _fields: fields });
+      const totalPages = Number(first.totalPages || 1);
+      const lastPage = max_pages ? Math.min(totalPages, start_page + max_pages - 1) : totalPages;
+      const pageNums = [];
+      for (let p = start_page + 1; p <= lastPage; p++) pageNums.push(p);
+      if (lastPage < totalPages) { complete = false; nextPage = lastPage + 1; }
+
+      const handle = (subs) => {
+        scanned += subs.length; pagesScanned++;
+        for (const s of subs) {
+          const d = (s[field] || "").substring(0, 19);
+          if (d && d >= fromIso && d <= toIso) {
+            matches.push({
+              id: s.id, status: s.status,
+              end_date: s.end_date_gmt || null,
+              next_payment_date: s.next_payment_date_gmt || null,
+              name: `${s.billing?.first_name || ""} ${s.billing?.last_name || ""}`.trim(),
+              email: s.billing?.email || "",
+              products: (s.line_items || []).map((li) => li.name),
+            });
+          }
+        }
+      };
+      handle(first.data);
+      for (let i = 0; i < pageNums.length; i += CONCURRENCY) {
+        const batch = pageNums.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(
+          batch.map((p) => wcGet("subscriptions", { status: st, per_page: 100, page: p, _fields: fields }))
+        );
+        for (const r of results) handle(r.data);
+      }
+    }
+
+    matches.sort((a, b) => ((a[date_field] || "") < (b[date_field] || "") ? -1 : 1));
+    const LIMIT = 500;
+    return asResult({
+      matched: matches.length,
+      scanned, pages_scanned: pagesScanned,
+      complete,
+      ...(nextPage ? { hint: `Scan unvollständig – mit start_page=${nextPage} fortsetzen.` } : {}),
+      ...(matches.length > LIMIT ? { note: `Nur die ersten ${LIMIT} Treffer (sortiert nach ${date_field}).` } : {}),
+      items: matches.slice(0, LIMIT),
+    });
+  }
 );
 
 server.registerTool(

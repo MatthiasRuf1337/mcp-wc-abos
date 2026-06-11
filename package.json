@@ -1,6 +1,6 @@
 {
   "name": "mcp-wc-abos",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "MCP-Server: Abos & Bestellungen aus shop.bundeslaenderinnen.at (WooCommerce REST API) abrufen",
   "type": "module",
   "bin": {
