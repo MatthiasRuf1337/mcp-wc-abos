@@ -4,6 +4,8 @@ MCP-Server für **shop.bundeslaenderinnen.at**: Abos (WooCommerce Subscriptions)
 Bestellungen über die REST API abrufen — **read-only**, der Server kann nichts ändern,
 löschen oder anlegen.
 
+**Öffentliches Repo:** https://github.com/MatthiasRuf1337/mcp-wc-abos
+
 ## Tools
 
 | Tool | Endpoint |
@@ -13,6 +15,13 @@ löschen oder anlegen.
 | `get_subscription_orders` | `GET /wc/v3/subscriptions/{id}/orders` |
 | `get_order` | `GET /wc/v3/orders/{id}` |
 | `list_orders` | `GET /wc/v3/orders?status=…&page=…` |
+| `find_customer` | `GET /wc/v3/customers?email=…` / `?search=…` |
+
+**Listen-Filter** (`list_subscriptions` / `list_orders`): `status`, `customer`, `search`,
+Zeitraum über `after` / `before` und `modified_after` / `modified_before` (`YYYY-MM-DD`
+reicht, volle ISO8601-Zeit optional), Sortierung über `orderby` (`date`/`id`/`modified`) +
+`order` (`asc`/`desc`). `list_orders` zusätzlich: `product` (Produkt-ID).
+`find_customer` liefert die `customer_id` für den `customer`-Filter.
 
 Listen-Antworten enthalten `total` / `total_pages` (aus den `X-WP-Total*`-Headern).
 `_links` wird aus den Antworten entfernt, sonst bleibt das JSON unverändert.
@@ -58,8 +67,8 @@ claude mcp add wc-abos -- node "$(pwd)/server.js"
 Der Server lädt eine `.env` neben `server.js` (oder eine Ebene höher) automatisch.
 Explizit gesetzte Umgebungsvariablen (z.B. via `--env`) haben Vorrang.
 
-> **Wichtig:** Die Keys niemals committen oder in Client-Code einbetten. Für diesen
-> Server reicht ein Key mit Berechtigung **Lesen**
+> **Wichtig:** Die Keys haben Vollzugriff im erlaubten Scope – niemals committen oder in
+> Client-Code einbetten. Für diesen Server reicht ein Key mit Berechtigung **Lesen**
 > (WooCommerce → Einstellungen → Erweitert → REST-API).
 
 ## Manuell testen

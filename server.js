@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// .env laden (neben server.js oder eine Ebene höher) – gesetzte Env-Variablen haben Vorrang
+// .env laden (mcp-wc-abos/.env oder webseite/.env) – gesetzte Env-Variablen haben Vorrang
 const here = dirname(fileURLToPath(import.meta.url));
 for (const envPath of [join(here, ".env"), join(here, "..", ".env")]) {
   try {
@@ -88,14 +88,38 @@ function listResult({ data, total, totalPages }, page) {
   });
 }
 
-const server = new McpServer({ name: "wc-abos", version: "1.0.0" });
+/** "YYYY-MM-DD" zu vollem ISO8601 ergänzen (before = Tagesende), sonst unverändert. */
+function isoDate(v, endOfDay = false) {
+  if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v + (endOfDay ? "T23:59:59" : "T00:00:00");
+  return v;
+}
+
+const server = new McpServer({ name: "wc-abos", version: "1.1.0" });
 
 const paginierung = {
   per_page: z.number().int().min(1).max(100).optional().describe("Treffer pro Seite (max. 100, Default 100)"),
   page: z.number().int().min(1).optional().describe("Seitennummer für Paginierung"),
-  customer: z.number().int().optional().describe("Nur Einträge eines Kunden (WordPress-User-ID)"),
+  customer: z.number().int().optional().describe("Nur Einträge eines Kunden (WordPress-User-ID, siehe find_customer)"),
   search: z.string().optional().describe("Freitextsuche (z.B. Name oder E-Mail)"),
+  after: z.string().optional().describe("Nur Einträge erstellt nach diesem Datum (YYYY-MM-DD oder ISO8601)"),
+  before: z.string().optional().describe("Nur Einträge erstellt vor diesem Datum (YYYY-MM-DD oder ISO8601)"),
+  modified_after: z.string().optional().describe("Nur Einträge geändert nach diesem Datum (YYYY-MM-DD oder ISO8601)"),
+  modified_before: z.string().optional().describe("Nur Einträge geändert vor diesem Datum (YYYY-MM-DD oder ISO8601)"),
+  orderby: z.enum(["date", "id", "modified"]).optional().describe("Sortierfeld (Default: date)"),
+  order: z.enum(["asc", "desc"]).optional().describe("Sortierrichtung (Default: desc = neueste zuerst)"),
 };
+
+/** Gemeinsame Listen-Parameter in API-Query-Parameter übersetzen. */
+function listParams({ status, per_page, page, customer, search, after, before, modified_after, modified_before, orderby, order }) {
+  return {
+    status, customer, search, orderby, order, page,
+    per_page: per_page ?? 100,
+    after: isoDate(after),
+    before: isoDate(before, true),
+    modified_after: isoDate(modified_after),
+    modified_before: isoDate(modified_before, true),
+  };
+}
 
 server.registerTool(
   "get_subscription",
@@ -117,7 +141,8 @@ server.registerTool(
     title: "Abos auflisten",
     description:
       "Abos auflisten, optional gefiltert nach Status (active, on-hold, pending-cancel, cancelled, " +
-      "expired, any), Kunde oder Freitextsuche. Antwort enthält total/total_pages für die Paginierung.",
+      "expired, any), Kunde, Freitextsuche oder Zeitraum (after/before auf das Erstelldatum). " +
+      "Antwort enthält total/total_pages für die Paginierung.",
     inputSchema: {
       status: z
         .enum(["active", "on-hold", "pending-cancel", "cancelled", "expired", "any"])
@@ -126,11 +151,7 @@ server.registerTool(
       ...paginierung,
     },
   },
-  async ({ status, per_page, page, customer, search }) =>
-    listResult(
-      await wcGet("subscriptions", { status, per_page: per_page ?? 100, page, customer, search }),
-      page
-    )
+  async (args) => listResult(await wcGet("subscriptions", listParams(args)), args.page)
 );
 
 server.registerTool(
@@ -164,20 +185,50 @@ server.registerTool(
     title: "Bestellungen auflisten",
     description:
       "Bestellungen auflisten, optional gefiltert nach Status (pending, processing, on-hold, completed, " +
-      "cancelled, refunded, failed, any), Kunde oder Freitextsuche.",
+      "cancelled, refunded, failed, any), Kunde, Produkt, Freitextsuche oder Zeitraum (after/before " +
+      "auf das Bestelldatum).",
     inputSchema: {
       status: z
         .enum(["pending", "processing", "on-hold", "completed", "cancelled", "refunded", "failed", "any"])
         .optional()
         .describe("Bestell-Status-Filter (Default: any)"),
+      product: z.number().int().optional().describe("Nur Bestellungen mit diesem Produkt (Produkt-ID)"),
       ...paginierung,
     },
   },
-  async ({ status, per_page, page, customer, search }) =>
-    listResult(
-      await wcGet("orders", { status, per_page: per_page ?? 100, page, customer, search }),
-      page
-    )
+  async (args) =>
+    listResult(await wcGet("orders", { ...listParams(args), product: args.product }), args.page)
+);
+
+server.registerTool(
+  "find_customer",
+  {
+    title: "Kunde finden",
+    description:
+      "Kunden per E-Mail oder Freitext (Name) suchen. Liefert die customer_id (WordPress-User-ID), " +
+      "die dann bei list_subscriptions/list_orders als customer-Parameter verwendet wird. " +
+      "E-Mail-Suche ist exakt, search findet auch Namensteile.",
+    inputSchema: {
+      email: z.string().optional().describe("Exakte E-Mail-Adresse des Kunden"),
+      search: z.string().optional().describe("Freitextsuche, z.B. Nachname"),
+    },
+  },
+  async ({ email, search }) => {
+    if (!email && !search) throw new Error("email oder search muss angegeben werden.");
+    const { data } = await wcGet("customers", { email, search, per_page: 20 });
+    return asResult(
+      data.map((c) => ({
+        customer_id: c.id,
+        email: c.email,
+        first_name: c.first_name,
+        last_name: c.last_name,
+        company: c.billing?.company || "",
+        city: c.billing?.city || "",
+        postcode: c.billing?.postcode || "",
+        country: c.billing?.country || "",
+      }))
+    );
+  }
 );
 
 const transport = new StdioServerTransport();
